@@ -1,0 +1,26 @@
+#!/usr/bin/env mkb
+options
+{
+	lib
+}
+
+packages
+{
+	
+}
+
+subprojects
+{
+	iwutil
+	iwgx
+	openal-soft-1.13
+	freealut-1.1.0
+} 
+
+files
+{
+	(freealut-1.1.0/src)
+	["src"]
+	"*.c"
+
+}

@@ -1,0 +1,27 @@
+#!/usr/bin/env mkb
+options
+{
+
+}
+
+packages
+{
+	
+}
+
+subprojects
+{
+	iwutil
+	iwgx
+	# include as a subproject to get the header files
+	openal-soft-1.13
+	freealut-1.1.0
+} 
+
+files
+{
+	(data)
+	"alsoft.conf"
+	(freealut-1.1.0/examples)
+	"hello_world.c"
+}

@@ -1,0 +1,46 @@
+#!/usr/bin/env mkb
+options
+{
+	lib
+}
+
+packages
+{
+	
+}
+
+subprojects
+{
+	iwutil
+	iwgx
+	# include as a subproject to get the header files
+	openal-soft-1.13
+} 
+
+files
+{
+	(openal-soft-1.13/Alc)
+	["src/Alc"]
+	ALc.c
+	alcConfig.c
+	alcEcho.c
+	alcModulator.c
+	alcReverb.c
+	alcRing.c
+	alcThread.c
+	ALu.c
+	bs2b.c
+	mixer.c
+	null.c
+	panning.c
+	s3esoundaudio.c
+	s3eaudioaudio.c
+	wave.c             
+	(openal-soft-1.13/OpenAL32)
+	["src/OpenAL32"]
+	"*.c"
+	(openal-soft-1.13/utils)
+	["src/utils"]
+	"*.c"
+
+}

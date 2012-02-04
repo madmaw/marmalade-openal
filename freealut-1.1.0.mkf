@@ -1,0 +1,33 @@
+includepath header
+
+library 
+{
+	".,freealut-1.1.0"
+}
+
+includepaths
+{
+	freealut-1.1.0/include
+}
+
+defines
+{
+	HAVE_STDINT_H
+	_MARMALADE
+	HAVE_STAT
+	HAVE_UNISTD_H
+	HAVE_NANOSLEEP 
+	HAVE_TIME_H
+}
+
+undefines
+{
+
+}
+
+files
+{
+	(freealut-1.1.0/include/AL)
+	["include/AL"]
+	"*.h"
+}
