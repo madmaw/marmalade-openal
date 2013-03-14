@@ -893,14 +893,14 @@ ALvoid aluMixData(ALCdevice *device, ALvoid *buffer, ALsizei size)
 
         /* Clear mixing buffer */
         memset(device->DryBuffer, 0, SamplesToDo*MAXCHANNELS*sizeof(ALfloat));
-
-        SuspendContext(NULL);
+        // aluMixData called only from s3e_gen_sound which is working on s3e internal
+        // thread, so we dont need and can't suspend contexts(synchronize threads) here
+	      //SuspendContext(NULL);
         ctx = device->Contexts;
         ctx_end = ctx + device->NumContexts;
         while(ctx != ctx_end)
         {
-            SuspendContext(*ctx);
-
+	          //SuspendContext(*ctx);
             src = (*ctx)->ActiveSources;
             src_end = src + (*ctx)->ActiveSourceCount;
             while(src != src_end)
@@ -945,12 +945,12 @@ ALvoid aluMixData(ALCdevice *device, ALvoid *buffer, ALsizei size)
                 for(i = 0;i < SamplesToDo;i++)
                     ALEffectSlot->WetBuffer[i] = 0.0f;
             }
-
-            ProcessContext(*ctx);
+	          //ProcessContext(*ctx);
             ctx++;
         }
-        ProcessContext(NULL);
-
+        
+	      //ProcessContext(NULL);
+        
         //Post processing lo op
         for(i = 0;i < SamplesToDo;i++)
         {

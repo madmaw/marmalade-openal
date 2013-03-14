@@ -18,157 +18,136 @@
 
 static const ALCchar s3eDevice[] = "s3eSound";
 
+
 typedef struct {
-	int channel;
+    int channel;
 
     ALubyte *buffer;
     ALuint size;
-
     volatile int killNow;
-    ALvoid *thread;
 } s3e_data;
 
 int32 s3e_more_audio(void* systemData, void* userData) {
     ALCdevice *pDevice = (ALCdevice*)userData;
-	s3eSoundGenAudioInfo* info = (s3eSoundGenAudioInfo*)systemData;
-	s3e_data* data = (s3e_data*)pDevice->ExtraData;
-	/*
-	aluMixData(pDevice, info->m_Target, pDevice->UpdateSize);
-	return pDevice->UpdateSize;
-	*/
-	memcpy(info->m_Target, info->m_OrigStart, info->m_OrigNumSamples);
-	return info->m_OrigNumSamples;		
+    s3eSoundGenAudioInfo* info = (s3eSoundGenAudioInfo*)systemData;
+  
+    s3e_data* data = (s3e_data*)pDevice->ExtraData;
+    if (data->killNow) {
+        info->m_EndSample = S3E_TRUE;
+        return 0;
+    }
+  
+    aluMixData(pDevice, info->m_Target, info->m_NumSamples);
+    return info->m_NumSamples;
 }
 
-
-static ALuint s3eProc(ALvoid *ptr)
-{
+/*
+static ALuint s3eProc(ALvoid *ptr) {
     ALCdevice *Device = (ALCdevice*)ptr;
     ALuint bytesize = BytesFromDevFmt(Device->FmtType);
 
     s3e_data *data = (s3e_data*)Device->ExtraData;
     ALuint now, start, i, v;
-	ALint b1, b2;
+    ALint b1, b2;
     ALuint64 avail, done;
     const ALuint restTime = (ALuint64)Device->UpdateSize * 1000 /
                             Device->Frequency / 2;
-	 
+    
     done = 0;
     start = timeGetTime();
-    while(!data->killNow && Device->Connected)
-    {
+    while(!data->killNow && Device->Connected) {
         now = timeGetTime();
 
         avail = (ALuint64)(now-start) * Device->Frequency / 1000;
-        if(avail < done)
-        {
-            /* Timer wrapped. Add the remainder of the cycle to the available
-             * count and reset the number of samples done */
+        if(avail < done) {
+            // Timer wrapped. Add the remainder of the cycle to the available
+            // count and reset the number of samples done
             avail += (ALuint64)0xFFFFFFFFu*Device->Frequency/1000 - done;
             done = 0;
         }
-        if(avail-done < Device->UpdateSize)
-        {
+        if(avail-done < Device->UpdateSize) {
             //Sleep(restTime);
-			Sleep((avail-done)*1000 / Device->Frequency / 2);
+            Sleep((avail-done)*1000 / Device->Frequency / 2);
             continue;
         }
-
-        while(avail-done >= Device->UpdateSize)
-        {
+        
+        while(avail-done >= Device->UpdateSize) {
             aluMixData(Device, data->buffer, Device->UpdateSize);
-			s3eSoundChannelPlay(data->channel, (int16*)data->buffer, Device->UpdateSize, 1, 0);
-			//s3eAudioPlayFromBuffer(data->buffer, Device->UpdateSize, 1);
+                  s3eSoundChannelPlay(data->channel, (int16*)data->buffer, Device->UpdateSize, 1, 0);
+            //s3eAudioPlayFromBuffer(data->buffer, Device->UpdateSize, 1);
             done += Device->UpdateSize;
         }
     }
 
     return 0;
 }
+*/
 
-
-static ALCboolean s3e_open_playback(ALCdevice *device, const ALCchar *deviceName)
-{
-	if( !deviceName ) {
-		deviceName = s3eDevice;
-	} 
-	if( strcmp(s3eDevice, deviceName) == 0 ) {
-		s3e_data* data = (s3e_data*)malloc(sizeof(s3e_data));
-		data->channel = s3eSoundGetFreeChannel();
-		data->buffer = NULL;
-		data->size = 0;
-		data->killNow = 0;
-		device->ExtraData = data;
-		device->szDeviceName = strdup(deviceName);
+static ALCboolean s3e_open_playback(ALCdevice *device, const ALCchar *deviceName) {
+    if( !deviceName ) {
+        deviceName = s3eDevice;
+    } 
+    if( strcmp(s3eDevice, deviceName) == 0 ) {
+        s3e_data* data = (s3e_data*)malloc(sizeof(s3e_data));
+        data->channel = s3eSoundGetFreeChannel();
+        data->buffer = NULL;
+        data->size = 0;
+        data->killNow = 0;
+        device->ExtraData = data;
+        device->szDeviceName = strdup(deviceName);
         device->FmtType = DevFmtShort;
-		//device->FmtChans = DevFmtStereo;
-		device->FmtChans = DevFmtMono;
-		device->Frequency = s3eSoundChannelGetInt(data->channel, S3E_CHANNEL_RATE);
-		return ALC_TRUE;
-	} else {
-		return ALC_FALSE;
-	}
+        device->FmtChans = DevFmtStereo;
+        device->Frequency = s3eSoundChannelGetInt(data->channel, S3E_CHANNEL_RATE);
+        return ALC_TRUE;
+    } else {
+        return ALC_FALSE;
+    }
 }
 
 
-static void s3e_close_playback(ALCdevice *device)
-{
+static void s3e_close_playback(ALCdevice *device) {
     s3e_data *data = (s3e_data*)device->ExtraData;
-	s3eSoundChannelStop(data->channel);
-	free(data);
+    s3eSoundChannelStop(data->channel);
+    free(data);
     device->ExtraData = NULL;
 }
 
-static ALCboolean s3e_reset_playback(ALCdevice *device)
-{
-	s3e_data *data = (s3e_data*)device->ExtraData;
+static ALCboolean s3e_reset_playback(ALCdevice *device) {
+    s3e_data *data = (s3e_data*)device->ExtraData;
 
     data->size = device->UpdateSize * FrameSizeFromDevFmt(device->FmtChans,
                                                           device->FmtType);
-	data->buffer = (ALubyte*)malloc(data->size * sizeof(ALubyte));
+    data->buffer = (ALubyte*)malloc(data->size * sizeof(ALubyte));
+    memset(data->buffer, 0, data->size * sizeof(ALubyte));
     if(!data->buffer)
     {
         AL_PRINT("buffer malloc failed\n");
         return ALC_FALSE;
     }
     SetDefaultWFXChannelOrder(device);
-
-	//s3eSoundChannelRegister(data->channel, S3E_CHANNEL_GEN_AUDIO, s3e_more_audio, device);
-	//s3eSoundChannelRegister(data->channel, S3E_CHANNEL_GEN_AUDIO_STEREO, s3e_more_audio, device);
-	data->thread = StartThread(s3eProc, device);
-    if(data->thread == NULL)
-    {
-        free(data->buffer);
-        data->buffer = NULL;
-        return ALC_FALSE;
-    }
-
-	return ALC_TRUE;
+    //StartThread(s3eProc, device);
+    s3eSoundChannelRegister(data->channel, S3E_CHANNEL_GEN_AUDIO, s3e_more_audio, device);
+    s3eSoundChannelRegister(data->channel, S3E_CHANNEL_GEN_AUDIO_STEREO, s3e_more_audio, device);
+    // Starting infinite playback cycle with any data
+    s3eSoundChannelPlay(data->channel, (int16*)data->buffer, data->size, 0, 0);
+    
+    return ALC_TRUE;
 }
 
-static void s3e_stop_playback(ALCdevice *device)
-{
+static void s3e_stop_playback(ALCdevice *device) {
     s3e_data *data = (s3e_data*)device->ExtraData;
 
-    if(!data->thread)
-        return;
-
     data->killNow = 1;
-    StopThread(data->thread);
-    data->thread = NULL;
-
-    data->killNow = 0;
-
-	s3eSoundChannelUnRegister(data->channel, S3E_CHANNEL_GEN_AUDIO_STEREO);
-	s3eSoundChannelUnRegister(data->channel, S3E_CHANNEL_GEN_AUDIO);
+    s3eSoundChannelUnRegister(data->channel, S3E_CHANNEL_GEN_AUDIO_STEREO);
+    s3eSoundChannelUnRegister(data->channel, S3E_CHANNEL_GEN_AUDIO);
+    s3eSoundChannelStop(data->channel);
     free(data->buffer);
     data->buffer = NULL;
 
 }
 
-static ALCboolean s3e_open_capture(ALCdevice *pDevice, const ALCchar *deviceName)
-{
-	// maybe one day
+static ALCboolean s3e_open_capture(ALCdevice *pDevice, const ALCchar *deviceName) {
+    // maybe one day
     (void)pDevice;
     (void)deviceName;
     return ALC_FALSE;
@@ -188,9 +167,9 @@ BackendFuncs s3e_funcs = {
 };
 
 void alc_s3e_init(BackendFuncs *func_list) {
-	*func_list = s3e_funcs;
+    *func_list = s3e_funcs;
 }
-	
+    
 void alc_s3e_deinit(void) {
 
 }
@@ -198,7 +177,7 @@ void alc_s3e_deinit(void) {
 void alc_s3e_probe(int type) {
     if(type == DEVICE_PROBE)
     {
-		AppendDeviceList(s3eDevice);
+        AppendDeviceList(s3eDevice);
     }
     else if(type == ALL_DEVICE_PROBE)
     {
