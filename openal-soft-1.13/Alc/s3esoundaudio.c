@@ -96,8 +96,14 @@ static ALCboolean s3e_open_playback(ALCdevice *device, const ALCchar *deviceName
         device->ExtraData = data;
         device->szDeviceName = strdup(deviceName);
         device->FmtType = DevFmtShort;
-        device->FmtChans = DevFmtStereo;
-        device->Frequency = s3eSoundChannelGetInt(data->channel, S3E_CHANNEL_RATE);
+        if( s3eSoundGetInt(S3E_SOUND_STEREO_ENABLED)) {
+          device->FmtChans = DevFmtStereo;
+        } else {
+          device->FmtChans = DevFmtMono;
+        }
+        //device->Frequency = s3eSoundChannelGetInt(data->channel, S3E_CHANNEL_RATE);
+        // when generating sound, channel frequency is ignored
+        device->Frequency = s3eSoundGetInt(S3E_SOUND_OUTPUT_FREQ);
         return ALC_TRUE;
     } else {
         return ALC_FALSE;
