@@ -1,3 +1,6 @@
 Port of OpenAL to Made With Marmalade 
 
-Currently only mono output is supported. Marmalade and OpenAL both support stereo output, the adapter just needs a bit of work to make it happen, there is some (non-functional) code to try and make this happen in the way I think it should happen (using the s3eSound callbacks/mixer). 
+Definitely supports mono output. 
+
+Was recently patched up a contributor to add stereo output. There are a few people using it who have posted issues/fixes in the issues section, so check that out if you have problems. 
+
