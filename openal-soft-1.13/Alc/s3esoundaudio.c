@@ -1,87 +1,105 @@
+
 #include "config.h"
 
-#include <sys/ioctl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <memory.h>
-#include <unistd.h>
-#include <errno.h>
-#include <math.h>
+#include <malloc.h>
 #include "alMain.h"
 #include "AL/al.h"
 #include "AL/alc.h"
 #include <s3eSound.h>
-#include <s3eAudio.h>
+#include <s3eThread.h>
+
 
 static const ALCchar s3eDevice[] = "s3eSound";
-
 
 typedef struct {
     int channel;
 
-    ALubyte *buffer;
-    ALuint size;
-    volatile int killNow;
+    ALubyte*                mix_data;
+    volatile int            killNow;
+
+    volatile ALvoid*        thread;     // Has to be volatile, it can change in different threads
+    s3eSoundGenAudioInfo*   thread_info;
+    s3eThreadSem*           thread_semaphore;
+    volatile int            thread_finishedWorking;
 } s3e_data;
 
-int32 s3e_more_audio(void* systemData, void* userData) {
-    ALCdevice *pDevice = (ALCdevice*)userData;
-    s3eSoundGenAudioInfo* info = (s3eSoundGenAudioInfo*)systemData;
-  
-    s3e_data* data = (s3e_data*)pDevice->ExtraData;
-    if (data->killNow) {
-        info->m_EndSample = S3E_TRUE;
-        return 0;
-    }
-  
-    aluMixData(pDevice, info->m_Target, info->m_NumSamples);
-    return info->m_NumSamples;
-}
 
-/*
-static ALuint s3eProc(ALvoid *ptr) {
+static ALuint s3e_channel_thread(ALvoid *ptr)
+{
     ALCdevice *Device = (ALCdevice*)ptr;
-    ALuint bytesize = BytesFromDevFmt(Device->FmtType);
-
     s3e_data *data = (s3e_data*)Device->ExtraData;
-    ALuint now, start, i, v;
-    ALint b1, b2;
-    ALuint64 avail, done;
-    const ALuint restTime = (ALuint64)Device->UpdateSize * 1000 /
-                            Device->Frequency / 2;
-    
-    done = 0;
-    start = timeGetTime();
-    while(!data->killNow && Device->Connected) {
-        now = timeGetTime();
 
-        avail = (ALuint64)(now-start) * Device->Frequency / 1000;
-        if(avail < done) {
-            // Timer wrapped. Add the remainder of the cycle to the available
-            // count and reset the number of samples done
-            avail += (ALuint64)0xFFFFFFFFu*Device->Frequency/1000 - done;
-            done = 0;
-        }
-        if(avail-done < Device->UpdateSize) {
-            //Sleep(restTime);
-            Sleep((avail-done)*1000 / Device->Frequency / 2);
+    // It is very important that this thread reacts ASAP to
+    // signal from s3e callback, so the main s3e thread is
+    // not paused for too long.
+    // Luckly, we can use semaphore to wait for signal from
+    // s3e callback function, that way we react immediately.
+
+    while( !data->killNow )
+    {
+        // Wait for s3e main thread to signal us via semaphore
+        if( s3eThreadSemWait(data->thread_semaphore, 10) != S3E_RESULT_SUCCESS ) {
+            // Waited 10ms, but without any signal - just check if we need
+            // to close this thread, and then wait again
             continue;
         }
-        
-        while(avail-done >= Device->UpdateSize) {
-            aluMixData(Device, data->buffer, Device->UpdateSize);
-                  s3eSoundChannelPlay(data->channel, (int16*)data->buffer, Device->UpdateSize, 1, 0);
-            //s3eAudioPlayFromBuffer(data->buffer, Device->UpdateSize, 1);
-            done += Device->UpdateSize;
-        }
+        assert(data->thread_finishedWorking == 0);
+
+        // Mix the data... Now OpenAL can lock its mutex without Marmalade reporting error
+        aluMixData(Device, data->thread_info->m_Target, data->thread_info->m_NumSamples);
+
+        // Signal to s3e callback function that we're finished with mixing the data
+        // We have to use volatile varialble instead of semaphore or lock (mutex)
+        // because Marmalade doesn't allow locking of the s3e thread
+        data->thread_finishedWorking = 1;
     }
 
     return 0;
 }
-*/
+
+
+int32 s3e_more_audio(void* systemData, void* userData)
+{
+    // This code assumes that s3e_more_audio won't be called while
+    // we're already in it.
+    // That is because this function is called only from the
+    // s3e main thread, and it has to wait for us to exit this 
+    // function before it can call it again
+
+    ALCdevice *pDevice = (ALCdevice*)userData;
+    s3eSoundGenAudioInfo* info = (s3eSoundGenAudioInfo*)systemData;
+    s3e_data* data;
+
+    if( systemData == NULL || userData == NULL ) return 0;
+    data = (s3e_data*)pDevice->ExtraData;
+
+    // Check if this channel is actually closed or should be closed
+    if( data == NULL || data->killNow || data->thread == NULL ) {
+        info->m_EndSample = S3E_TRUE;
+        return 0;
+    }
+
+    // We can't call aluMixData() directly, because in it it calls mutex lock
+    // and s3e doesn't allow callback functions to lock the main s3e thread
+    //aluMixData(pDevice, info->m_Target, info->m_NumSamples);
+
+    // So set up worker thread data
+    data->thread_info = info;
+    data->thread_finishedWorking = 0;
+
+    // Signal our thread that it has work waiting for it
+    // We can use semaphore in this case, because we will not block this thread
+    // Worker thread will act immediately.
+    s3eThreadSemPost(data->thread_semaphore);
+
+    // Wait for worker thread to finish with work
+    // And we can't wait with our semaphore... because it would block s3e thread and that's not allowed
+    // So we have to use volatile variable and Sleep() instead.
+    while( data->thread && data->thread_finishedWorking == 0 ) Sleep(0);
+
+    return info->m_NumSamples;
+}
+
 
 static ALCboolean s3e_open_playback(ALCdevice *device, const ALCchar *deviceName) {
     if( !deviceName ) {
@@ -90,20 +108,22 @@ static ALCboolean s3e_open_playback(ALCdevice *device, const ALCchar *deviceName
     if( strcmp(s3eDevice, deviceName) == 0 ) {
         s3e_data* data = (s3e_data*)malloc(sizeof(s3e_data));
         data->channel = s3eSoundGetFreeChannel();
-        data->buffer = NULL;
-        data->size = 0;
+        data->mix_data = NULL;
         data->killNow = 0;
+        data->thread_semaphore = NULL;
+        data->thread_finishedWorking = 0;
         device->ExtraData = data;
         device->szDeviceName = strdup(deviceName);
         device->FmtType = DevFmtShort;
-        if( s3eSoundGetInt(S3E_SOUND_STEREO_ENABLED)) {
+
+        if( s3eSoundGetInt(S3E_SOUND_STEREO_ENABLED) ) {
           device->FmtChans = DevFmtStereo;
         } else {
           device->FmtChans = DevFmtMono;
         }
-        //device->Frequency = s3eSoundChannelGetInt(data->channel, S3E_CHANNEL_RATE);
         // when generating sound, channel frequency is ignored
         device->Frequency = s3eSoundGetInt(S3E_SOUND_OUTPUT_FREQ);
+
         return ALC_TRUE;
     } else {
         return ALC_FALSE;
@@ -120,36 +140,63 @@ static void s3e_close_playback(ALCdevice *device) {
 
 static ALCboolean s3e_reset_playback(ALCdevice *device) {
     s3e_data *data = (s3e_data*)device->ExtraData;
+    int dataSize = device->UpdateSize * FrameSizeFromDevFmt(device->FmtChans, device->FmtType);
 
-    data->size = device->UpdateSize * FrameSizeFromDevFmt(device->FmtChans,
-                                                          device->FmtType);
-    data->buffer = (ALubyte*)malloc(data->size * sizeof(ALubyte));
-    memset(data->buffer, 0, data->size * sizeof(ALubyte));
-    if(!data->buffer)
-    {
+    data->mix_data = (ALubyte*)calloc(1, dataSize * sizeof(ALubyte));
+    if(!data->mix_data) {
         AL_PRINT("buffer malloc failed\n");
         return ALC_FALSE;
     }
     SetDefaultWFXChannelOrder(device);
-    //StartThread(s3eProc, device);
+
+    // Create semaphore we will use to signal worker thread
+    data->thread_semaphore = s3eThreadSemCreate(0);
+
+    // Start worker thread
+    data->killNow = 0;
+    data->thread = StartThread(s3e_channel_thread, device);
+    if(data->thread == NULL)
+    {
+        free(data->mix_data);
+        data->mix_data = NULL;
+        s3eThreadSemDestroy(data->thread_semaphore);
+        return ALC_FALSE;
+    }
+
+    // Register & start callback functions
     s3eSoundChannelRegister(data->channel, S3E_CHANNEL_GEN_AUDIO, s3e_more_audio, device);
     s3eSoundChannelRegister(data->channel, S3E_CHANNEL_GEN_AUDIO_STEREO, s3e_more_audio, device);
+
     // Starting infinite playback cycle with any data
-    s3eSoundChannelPlay(data->channel, (int16*)data->buffer, data->size, 0, 0);
-    
+    s3eSoundChannelPlay(data->channel, (int16*)data->mix_data, dataSize, 0, 0);
     return ALC_TRUE;
 }
 
 static void s3e_stop_playback(ALCdevice *device) {
     s3e_data *data = (s3e_data*)device->ExtraData;
 
+    // Signal the thread that it has to close
     data->killNow = 1;
+
+    // Stop the callback functions
     s3eSoundChannelUnRegister(data->channel, S3E_CHANNEL_GEN_AUDIO_STEREO);
     s3eSoundChannelUnRegister(data->channel, S3E_CHANNEL_GEN_AUDIO);
-    s3eSoundChannelStop(data->channel);
-    free(data->buffer);
-    data->buffer = NULL;
 
+    // Stop the thread
+    if(data->thread) {
+        ALvoid *thread = (ALvoid*)data->thread;
+        data->thread = NULL;    // Remove the pointer to thread before stopping it
+        StopThread( thread );
+    }
+
+    // Destroy the semaphore
+    if(data->thread_semaphore != NULL) s3eThreadSemDestroy(data->thread_semaphore);
+
+    s3eSoundChannelStop(data->channel);
+    if( data->mix_data != NULL ) {
+        free(data->mix_data);
+        data->mix_data = NULL;
+    }
 }
 
 static ALCboolean s3e_open_capture(ALCdevice *pDevice, const ALCchar *deviceName) {
