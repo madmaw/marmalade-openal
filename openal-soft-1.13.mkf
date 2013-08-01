@@ -1,3 +1,6 @@
+
+display_name "libs/OpenAL Soft 1.13"
+
 includepath header
 
 library 
