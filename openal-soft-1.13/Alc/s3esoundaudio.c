@@ -21,6 +21,7 @@ typedef struct {
     s3eSoundGenAudioInfo*   thread_info;
     s3eThreadSem*           thread_semaphore;
     volatile int            thread_finishedWorking;
+    volatile int            thread_exited;
 } s3e_data;
 
 
@@ -28,11 +29,12 @@ static ALuint s3e_channel_thread(ALvoid *ptr)
 {
     ALCdevice *Device = (ALCdevice*)ptr;
     s3e_data *data = (s3e_data*)Device->ExtraData;
+    data->thread_exited = 0;
 
     // It is very important that this thread reacts ASAP to
     // signal from s3e callback, so the main s3e thread is
     // not paused for too long.
-    // Luckly, we can use semaphore to wait for signal from
+    // Luckily, we can use semaphore to wait for signal from
     // s3e callback function, that way we react immediately.
 
     while( !data->killNow )
@@ -54,6 +56,7 @@ static ALuint s3e_channel_thread(ALvoid *ptr)
         data->thread_finishedWorking = 1;
     }
 
+    data->thread_exited = 1;
     return 0;
 }
 
@@ -74,7 +77,7 @@ int32 s3e_more_audio(void* systemData, void* userData)
     data = (s3e_data*)pDevice->ExtraData;
 
     // Check if this channel is actually closed or should be closed
-    if( data == NULL || data->killNow || data->thread == NULL ) {
+    if( data == NULL || data->killNow || data->thread == NULL || data->thread_exited ) {
         info->m_EndSample = S3E_TRUE;
         return 0;
     }
@@ -112,6 +115,7 @@ static ALCboolean s3e_open_playback(ALCdevice *device, const ALCchar *deviceName
         data->killNow = 0;
         data->thread_semaphore = NULL;
         data->thread_finishedWorking = 0;
+        data->thread_exited = 0;
         device->ExtraData = data;
         device->szDeviceName = strdup(deviceName);
         device->FmtType = DevFmtShort;
@@ -174,6 +178,7 @@ static ALCboolean s3e_reset_playback(ALCdevice *device) {
 
 static void s3e_stop_playback(ALCdevice *device) {
     s3e_data *data = (s3e_data*)device->ExtraData;
+    int i;
 
     // Signal the thread that it has to close
     data->killNow = 1;
@@ -186,6 +191,10 @@ static void s3e_stop_playback(ALCdevice *device) {
     if(data->thread) {
         ALvoid *thread = (ALvoid*)data->thread;
         data->thread = NULL;    // Remove the pointer to thread before stopping it
+
+        // Wait for thread to exit gracefully, but don't block indefinitely
+        for( i=0; i<20 && !data->thread_exited; i++ ) Sleep(2);
+        // And now really stop the thread
         StopThread( thread );
     }
 
