@@ -124,6 +124,72 @@ typedef pthread_key_t tls_type;
 #define tls_get(x) pthread_getspecific((x))
 #define tls_set(x, a) pthread_setspecific((x), (a))
 
+
+#if defined(HAVE_S3E_SOUND)     // Marmalade-specific code
+
+// Implementation of pthread_mutex in Marmalade 
+// is not always working correctly
+// So I had to make my own recursive mutex
+
+#include <s3eThread.h>
+
+typedef struct _s3eRecursiveMutex
+{
+    volatile int        recursion;
+    volatile s3eThread  *lockingThread;
+    s3eThreadLock       *mutex;
+} s3eRecursiveMutex;
+
+typedef s3eRecursiveMutex* CRITICAL_SECTION;
+static __inline void EnterCriticalSection(CRITICAL_SECTION *cs)
+{
+    int ret;
+    s3eThread *currThread = s3eThreadGetCurrent();
+    assert( (*cs) != NULL );
+
+    if( currThread == (*cs)->lockingThread )
+    {
+        (*cs)->recursion ++;
+    } else {
+        ret = s3eThreadLockAcquire( (*cs)->mutex, -1 ) != S3E_RESULT_SUCCESS;
+        assert(ret == 0);
+        assert( (*cs)->recursion == 0 );
+        (*cs)->lockingThread = currThread;
+        (*cs)->recursion = 1;
+    }
+}
+static __inline void LeaveCriticalSection(CRITICAL_SECTION *cs)
+{
+    int ret;
+    if( -- (*cs)->recursion == 0 )
+    {
+        (*cs)->lockingThread = NULL;
+        ret = s3eThreadLockRelease( (*cs)->mutex ) != S3E_RESULT_SUCCESS;
+        assert(ret == 0);
+    }
+}
+static __inline void InitializeCriticalSection(CRITICAL_SECTION *cs)
+{
+    s3eRecursiveMutex *mutex;
+    mutex = (s3eRecursiveMutex*)malloc( sizeof(s3eRecursiveMutex) );
+    mutex->mutex = s3eThreadLockCreate();
+    mutex->lockingThread = NULL;
+    mutex->recursion = 0;
+    *cs = mutex;
+}
+
+static __inline void DeleteCriticalSection(CRITICAL_SECTION *cs)
+{
+    int ret;
+    ret = s3eThreadLockDestroy( (*cs)->mutex ) != S3E_RESULT_SUCCESS;
+    assert( ret == 0 );
+    assert( (*cs)->lockingThread == NULL );
+    free( *cs );
+    *cs = NULL;
+}
+
+#else
+
 typedef pthread_mutex_t CRITICAL_SECTION;
 static __inline void EnterCriticalSection(CRITICAL_SECTION *cs)
 {
@@ -163,6 +229,8 @@ static __inline void DeleteCriticalSection(CRITICAL_SECTION *cs)
     ret = pthread_mutex_destroy(cs);
     assert(ret == 0);
 }
+#endif
+
 
 /* NOTE: This wrapper isn't quite accurate as it returns an ALuint, as opposed
  * to the expected DWORD. Both are defined as unsigned 32-bit types, however.
