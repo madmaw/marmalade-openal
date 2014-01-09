@@ -2,14 +2,12 @@ Port of OpenAL to Made With Marmalade
 
 Supports both stereo and mono output.
 
-This version should be stable on all platforms - it has been tested on PC, Android and iOS.
-Stable means that OpenAL and s3e sound thread and application are properly synchronized, it means that it won't freeze or crash your application on device suspend/resume, and that it won't hang your application when it should be closed.
+New version (as of January 2014) with new thread synchronizing algorithm.
+It uses less CPU, and it should work without any cracking sound.
 
-Only negative side is that current implementation has lot of cracking in the sound on PC, but luckily on Android and iPhone/iPad/iPod it sounds good without cracking.
+Throughly tested on all iOS mobile devices (iPhone/iPad/iPod), and on PC and on Android. It should work on other platforms too.
 
-
-Once Marmalade is fixed to allow mutex locks inside s3e callback, this player should be rewritten, as then you wouldn't need worker thread but could call aluMixData() directly from s3e sound callback. That implementation should both be faster and give better sound quality than this implementation. So if you have  problems with this implementation, complain to Marmalade to allow mutex locks inside s3e sound callback :)
-
+Once Marmalade is fixed to allow mutex locks inside s3e callback, this player should be rewritten, as then you wouldn't need worker thread but could call aluMixData() directly from s3e sound callback. That implementation should both be faster and give better sound quality than this implementation. So if you have problems with this implementation, complain to Marmalade to allow mutex locks inside s3e sound callback :)
 
 
 There are a few people using it who have posted issues/fixes in the issues section, so check that out if you have problems. 
